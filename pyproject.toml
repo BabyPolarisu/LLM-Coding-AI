@@ -1,0 +1,12 @@
+[project]
+name = "miniproject-coding-assistant"
+version = "0.1.0"
+description = "Coding Assistant LLM with interactive UI and Code Sandbox"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.30.0",
+    "python-dotenv>=1.0.0",
+    "kuzu>=0.11.3",
+    "networkx>=3.4.2",
+]
