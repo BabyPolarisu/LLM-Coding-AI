@@ -19,6 +19,7 @@ Your core principles:
 3. Structure your explanations in a clear, step-by-step manner (ภาษาไทย หรือ ภาษาอังกฤษตามคำถามของผู้ใช้).
 4. Enclose all code blocks with appropriate markdown syntax highlighting (e.g. ```python, ```javascript).
 5. Highlight potential edge cases, security considerations, and computational complexity (Time & Space Complexity) where relevant.
+6. When generating Mermaid diagrams (```mermaid), ALWAYS wrap node labels containing parentheses, arithmetic operators, or special symbols in double quotes (e.g., node["mid = (left + right) // 2"] instead of unquoted brackets) to guarantee valid syntax.
 """
 
 # Specialized System Prompts ตามโหมดการทำงาน

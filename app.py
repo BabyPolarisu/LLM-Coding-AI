@@ -8,7 +8,9 @@ app.py — Main Streamlit Application for MiniProject Coding Assistant
 4. แท็บ '📚 คำอธิบายระบบขั้นตอน': อธิบายสถาปัตยกรรมและการสร้างแต่ละขั้นตอนอย่างละเอียด
 """
 
+import re
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 from typing import Optional
 
@@ -27,6 +29,126 @@ from code_runner import run_python_code, extract_python_code
 from dataset_manager import DatasetManager
 from code_graph_engine import CodeGraphEngine
 from hybrid_retriever import QuestionRouter
+
+
+def extract_mermaid_code(markdown_text: str) -> Optional[str]:
+    """ดึงโค้ด Mermaid จากคำตอบของ LLM เพื่อนำไปเรนเดอร์เป็นภาพไดอะแกรมสด"""
+    if not markdown_text:
+        return None
+    pattern = re.compile(r"```(?:mermaid)\s*\n?(.*?)\n?```", re.DOTALL | re.IGNORECASE)
+    match = pattern.search(str(markdown_text))
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return None
+
+
+def sanitize_mermaid_code(code: str) -> str:
+    """
+    แก้ไข Syntax ที่พบบ่อยใน Mermaid โดยเฉพาะวงเล็บหรือเครื่องหมายพิเศษภายใน Node:
+    เช่น C[mid = (left + right) // 2] -> C["mid = (left + right) // 2"]
+    """
+    if not code:
+        return ""
+    lines = []
+    for line in code.splitlines():
+        # แก้ไข Node [ ... ] ที่มีวงเล็บหรือสัญลักษณ์ข้างในแต่ไม่ได้ใส่คำพูดครอบ
+        def fix_brackets(m):
+            node_id = m.group(1)
+            content = m.group(2).strip()
+            if content.startswith('"') and content.endswith('"'):
+                return m.group(0)
+            if any(ch in content for ch in "()[]{}/<>*&%$#@!,;:"):
+                content = content.replace('"', "'")
+                return f'{node_id}["{content}"]'
+            return m.group(0)
+
+        # แก้ไข Node { ... } (Diamond Decision) ที่มีเครื่องหมายพิเศษ
+        def fix_braces(m):
+            node_id = m.group(1)
+            content = m.group(2).strip()
+            if content.startswith('"') and content.endswith('"'):
+                return m.group(0)
+            if any(ch in content for ch in "()[]{}/<>*&%$#@!,;:"):
+                content = content.replace('"', "'")
+                return f'{node_id}{{"{content}"}}'
+            return m.group(0)
+
+        line = re.sub(r'([A-Za-z0-9_]+)\[([^\]\n]+)\]', fix_brackets, line)
+        line = re.sub(r'([A-Za-z0-9_]+)\{([^\}\n]+)\}', fix_braces, line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def render_mermaid(code: str, height: int = 360):
+    """เรนเดอร์ Mermaid Diagram เป็นกราฟฟิก Interactive SVG แบบสดๆ พร้อมระบบ Auto-Fix Syntax และ Error Catching"""
+    import html
+    sanitized_code = sanitize_mermaid_code(code.strip())
+    escaped_code = html.escape(sanitized_code)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <script type="module">
+            import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+            mermaid.initialize({{ 
+                startOnLoad: false, 
+                theme: 'neutral',
+                securityLevel: 'loose',
+                flowchart: {{ useMaxWidth: true, htmlLabels: true, curve: 'basis' }}
+            }});
+
+            async function renderDiagram() {{
+                const target = document.getElementById('mermaid-target');
+                const rawCode = document.getElementById('raw-mermaid-data').value;
+                try {{
+                    const uniqueId = 'mermaid_' + Math.random().toString(36).substring(2, 9);
+                    const {{ svg }} = await mermaid.render(uniqueId, rawCode);
+                    target.innerHTML = svg;
+                }} catch (err) {{
+                    console.warn("Mermaid render error:", err);
+                    target.innerHTML = `
+                        <div style="background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; padding: 12px; font-size: 13px; color: #9f1239; text-align: left; max-width: 95%; margin: auto;">
+                            <b>⚠️ ไม่สามารถวาดไดอะแกรมได้เนื่องจากรูปแบบ Mermaid ผิดพลาด (Syntax Error):</b><br>
+                            <code>${{err.message || err}}</code><br><br>
+                            <span style="color: #475569;">💡 <b>วิธีแก้ไข:</b> หากในชื่อกล่องมีเครื่องหมายวงเล็บ <code>( )</code> หรือเครื่องหมายคำนวณ ให้ใส่เครื่องหมายคำพูดครอบ เช่น <code>C["mid = (left + right) // 2"]</code></span>
+                        </div>
+                    `;
+                }}
+            }}
+            window.addEventListener('DOMContentLoaded', renderDiagram);
+        </script>
+        <style>
+            body {{
+                margin: 0;
+                padding: 10px;
+                background-color: transparent;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            }}
+            .mermaid-target {{
+                width: 100%;
+                text-align: center;
+                overflow: auto;
+            }}
+            svg {{
+                max-width: 100% !important;
+                height: auto !important;
+            }}
+        </style>
+    </head>
+    <body>
+        <textarea id="raw-mermaid-data" style="display:none;">{escaped_code}</textarea>
+        <div id="mermaid-target" class="mermaid-target">
+            <span style="color: #64748b; font-size: 13px;">⏳ กำลังวาดแผนภาพ...</span>
+        </div>
+    </body>
+    </html>
+    """
+    components.html(html_content, height=height, scrolling=True)
 
 
 def generate_chat_markdown(chat_history: list) -> str:
@@ -173,7 +295,14 @@ if "prefilled_prompt" not in st.session_state:
 
 @st.cache_resource
 def get_graph_engine() -> CodeGraphEngine:
-    return CodeGraphEngine()
+    ge = CodeGraphEngine()
+    try:
+        stats = ge.get_stats()
+        if stats.get("functions", 0) == 0:
+            ge.index_codebase(".")
+    except Exception:
+        pass
+    return ge
 
 @st.cache_resource
 def get_question_router() -> QuestionRouter:
@@ -342,7 +471,10 @@ with st.sidebar:
         "เขียน Quick Sort Algorithm พร้อมคำนวณ Time Complexity",
         "สร้างฟังก์ชัน Fibonacci แบบ Dynamic Programming",
         "เขียน REST API ด้วย FastAPI สำหรับระบบสินค้า",
-        "สร้าง Binary Search Tree พร้อมเมธอด insert และ search"
+        "สร้าง Binary Search Tree พร้อมเมธอด insert และ search",
+        "ใครเรียกใช้ฟังก์ชัน run_python_code บ้าง และส่งค่าอะไรเข้าไป",
+        "ฟังก์ชัน retrieve_relevant_resources มีการเรียกใช้ฟังก์ชันอะไรต่อบ้าง",
+        "อธิบายโครงสร้างสถาปัตยกรรมและความสัมพันธ์ของโมดูลใน Codebase นี้"
     ]
     for ex in example_prompts:
         if st.button(f"📌 {ex}", use_container_width=True, key=f"btn_{ex}"):
@@ -488,6 +620,12 @@ with tab_assistant:
                             st.toast("✅ ส่งโค้ดเข้า Sandbox สำเร็จ! สามารถคลิกแท็บ '⚡ ทดสอบรันโค้ด (Sandbox)' ด้านบนเพื่อทดสอบรันได้เลย")
                             time.sleep(0.3)
                             st.rerun()
+
+                # ตรวจจับและเรนเดอร์ Mermaid Diagram สดทันทีถ้ามีในข้อความ
+                mermaid_diag = extract_mermaid_code(msg.get("content", ""))
+                if mermaid_diag:
+                    with st.expander("📊 ดูแผนภาพกราฟสด (Live Interactive Diagram)", expanded=True):
+                        render_mermaid(mermaid_diag, height=360)
 
     # รับ Input Prompt จากผู้ใช้
     user_prompt_input = st.chat_input(
@@ -740,11 +878,12 @@ with tab_graph:
     st.divider()
 
     # Sub-tabs สำหรับการใช้งาน Graph RAG
-    subtab_func, subtab_mod, subtab_cypher, subtab_router = st.tabs([
+    subtab_func, subtab_mod, subtab_cypher, subtab_router, subtab_visualizer = st.tabs([
         "🔍 วิเคราะห์ความสัมพันธ์ฟังก์ชัน (Functions & Calls)",
         "📦 ภาพรวมโมดูล (Module Inspector)",
         "⚡ ทดสอบคำสั่ง Cypher Query สด",
-        "🔀 จำลองการทำงานของ QuestionRouter"
+        "🔀 จำลองการทำงานของ QuestionRouter",
+        "🎨 ตัวแสดงผลกราฟ Mermaid สด (Live Visualizer)"
     ])
 
     # Sub-tab 1: Function Analyzer
@@ -771,9 +910,11 @@ with tab_graph:
 
             # แสดงผล
             if graph_action == "แผนภาพ Callers & Callees (Mermaid)":
-                st.markdown("**📊 แผนภาพความสัมพันธ์ (Interactive Mermaid Diagram):**")
+                st.markdown("**📊 แผนภาพความสัมพันธ์สด (Live Interactive Diagram):**")
                 mermaid_code = st.session_state.graph_engine.generate_function_mermaid(selected_func)
-                st.markdown(f"```mermaid\n{mermaid_code}\n```")
+                render_mermaid(mermaid_code, height=360)
+                with st.expander("📝 ดูโค้ด Mermaid Syntax"):
+                    st.code(mermaid_code, language="mermaid")
                 
             elif graph_action == "ใครเรียกใช้ฟังก์ชันนี้? (Callers)":
                 callers = st.session_state.graph_engine.get_callers(selected_func)
@@ -901,6 +1042,52 @@ with tab_graph:
                 if r_result["matched_keywords"]:
                     st.markdown("**คีย์เวิร์ดที่ตรวจพบ:** " + " ".join([f"`{k}`" for k in r_result["matched_keywords"]]))
                 st.caption(f"เส้นทาง: `{r_result['route'].upper()}` -> ระบบจะดึงข้อมูลจาก `{ 'Kùzu Graph DB' if r_result['route'] == 'graph' else 'Hybrid BM25 + Dense Vector' }`")
+
+    # Sub-tab 5: Live Mermaid Visualizer
+    with subtab_visualizer:
+        st.markdown("#### 🎨 ตัวแสดงผลกราฟ Mermaid สด (Live Interactive Visualizer)")
+        st.markdown("พิมพ์หรือวางโค้ด Mermaid ที่ได้จาก AI ในกล่องข้อความด้านล่าง เพื่อดูกราฟฟิก SVG แสดงโหนดและเส้นเชื่อมโยงแบบสดๆ ได้ทันที")
+
+        default_mermaid_demo = (
+            "graph LR\n"
+            "  UI[\"🖥️ Streamlit Frontend\"] --> Router{\"🔀 QuestionRouter\"}\n"
+            "  Router -->|'graph'| Kuzu[\"🕸️ Kùzu Graph DB (AST)\"]\n"
+            "  Router -->|'vector'| RAG[\"🧠 Hybrid RAG (BM25+Dense)\"]\n"
+            "  Kuzu --> Context[\"📄 Augmented Context\"]\n"
+            "  RAG --> Context\n"
+            "  Context --> LLM[\"🤖 LLM Engine (Ollama)\"]\n"
+            "  LLM --> Sandbox[\"⚡ Subprocess Sandbox\"]\n"
+            "  style UI fill:#3b82f6,stroke:#1d4ed8,color:#fff\n"
+            "  style Kuzu fill:#8b5cf6,stroke:#6d28d9,color:#fff\n"
+            "  style RAG fill:#10b981,stroke:#047857,color:#fff\n"
+            "  style LLM fill:#f59e0b,stroke:#b45309,color:#fff\n"
+        )
+
+        c_v1, c_v2 = st.columns([1, 1.3])
+        with c_v1:
+            st.markdown("**📝 โค้ด Mermaid (แก้ไขได้อิสระ):**")
+            mermaid_input = st.text_area(
+                "Mermaid Code Editor",
+                value=default_mermaid_demo,
+                height=340,
+                key="custom_mermaid_editor",
+                label_visibility="collapsed"
+            )
+            col_mv1, col_mv2 = st.columns(2)
+            with col_mv1:
+                if st.button("🔄 อัปเดตกราฟ (Render)", use_container_width=True, type="primary"):
+                    st.rerun()
+            with col_mv2:
+                if st.button("📋 ใช้ตัวอย่าง Architecture", use_container_width=True):
+                    st.session_state["custom_mermaid_editor"] = default_mermaid_demo
+                    st.rerun()
+
+        with c_v2:
+            st.markdown("**📊 แผนภาพกราฟฟิกสด (Interactive Rendered SVG):**")
+            if mermaid_input and mermaid_input.strip():
+                render_mermaid(mermaid_input, height=360)
+            else:
+                st.info("กรุณาวางโค้ด Mermaid ในช่องซ้ายมือเพื่อเรนเดอร์กราฟ")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4: INTERNET RESOURCE DATASET & HYBRID RAG PLAYGROUND

@@ -46,11 +46,20 @@ class CodeGraphEngine:
             except Exception as err:
                 # หากมี Process อื่นเปิดใช้งานอยู่ หรือติด file lock บน Windows
                 # ให้ fallback ไปใช้ In-Memory Graph Database ทันที เพื่อให้เว็บทำงานต่อเนื่องได้ 100%
-                print(f"[Warning] Kùzu storage lock ({err}). Switching to in-memory graph database.")
+                print(f"[Warning] Kuzu storage lock or corruption ({err}). Recreating database.")
                 try:
-                    _GLOBAL_KUZU_DB = kuzu.Database("")
+                    # Clean up corrupted wal/db if invalid
+                    if self.db_path.exists():
+                        if self.db_path.is_dir():
+                            shutil.rmtree(self.db_path, ignore_errors=True)
+                        else:
+                            self.db_path.unlink(missing_ok=True)
+                    wal_file = self.db_path.parent / (self.db_path.name + ".wal")
+                    if wal_file.exists():
+                        wal_file.unlink(missing_ok=True)
+                    _GLOBAL_KUZU_DB = kuzu.Database(str(self.db_path))
                 except Exception:
-                    _GLOBAL_KUZU_DB = None
+                    _GLOBAL_KUZU_DB = kuzu.Database("")
         self.db = _GLOBAL_KUZU_DB
         self.conn = kuzu.Connection(self.db)
         self._create_schema()
