@@ -1,7 +1,7 @@
-# 💻 AI Coding Assistant — MiniProject
+# AI Coding Assistant — MiniProject
 
 
-## 📖 สารบัญ (Table of Contents)
+## สารบัญ (Table of Contents)
 1. [ภาพรวมของโปรเจกต์ (Overview)](#-ภาพรวมของโปรเจกต์-overview)
 2. [สถาปัตยกรรมของระบบ (System Architecture)](#-สถาปัตยกรรมของระบบ-system-architecture)
 3. [คำอธิบายการทำงานของแต่ละระบบขั้นตอน (Step-by-Step System Breakdown)](#-คำอธิบายการทำงานของแต่ละระบบขั้นตอน)
